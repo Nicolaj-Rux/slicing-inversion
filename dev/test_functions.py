@@ -20,6 +20,10 @@ def inverse_multi_quadric(s, c=1):
     return 1 / (c**2 + s**2).sqrt()
 
 
+def Laplace(s):
+    return (-s.abs()).exp()
+
+
 def logarithmic(s):
     out = s.abs().log()
     if isinstance(out, torch.Tensor):

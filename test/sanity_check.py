@@ -2,7 +2,7 @@ import torch
 from dev.constants import DEVICE, DTYPE, PI, SQRT_PI, SQRT_2
 from dev.test_functions import (
     bumb, Gauss, inverse_logarithmic, inverse_multi_quadric,
-    logarithmic, multi_quadric, Riesz, thin_plate
+    Laplace, logarithmic, multi_quadric, Riesz, thin_plate
 )
 from dev.auxiliary_functions import get_c, varrho, varrho_inv, eval_cos_series
 from dev.quadrature import GLQ
@@ -23,6 +23,7 @@ plt.plot(s, bumb(s), label="bumb")
 plt.plot(s, Gauss(s), label="Gauss")
 plt.plot(s, inverse_logarithmic(s), label="ilog")
 plt.plot(s, inverse_multi_quadric(s), label="imq")
+plt.plot(s, Laplace(s), label="Laplace")
 plt.plot(s, logarithmic(s), label="log")
 plt.plot(s, multi_quadric(s), label="mq")
 plt.plot(s, Riesz(s), label="Riesz")
