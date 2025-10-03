@@ -1,10 +1,12 @@
+# Computing the approximation error for 7 RBFs
+
+# Dependencies
 import gc
 import torch
-from dev.slicing import slicing
-from dev.test_functions import (Gauss, Laplace, Riesz, thin_plate, logarithmic,
-                                inverse_multi_quadric, multi_quadric,
-                                bumb, inverse_logarithmic)
-from dev.constants import SQRT_2, DEVICE
+from dev.test_functions import (Gauss, Laplace, thin_plate, logarithmic,
+                                inverse_multi_quadric, multi_quadric, bump)
+from dev.constants import DEVICE
+from test.wrapper import build_kernel_params
 from simple_torch_NFFT import Fastsum
 from tqdm import tqdm
 
@@ -13,33 +15,6 @@ print(DEVICE)
 gc.collect()
 torch.cuda.empty_cache()
 torch.cuda.reset_peak_memory_stats()
-
-
-# exact computation of MMD
-def exact_mmd(F, scale, X, Y, Xw, bs_mmd):
-    S = torch.zeros(Y.shape[0], device=DEVICE)
-    for a in range(0, Y.shape[0], bs_mmd):
-        b = min([a + bs_mmd, Y.shape[0]])
-        S[a:b] = F(torch.norm(X[None, :, :]-Y[a:b, None, :], dim=2)/scale)@Xw
-    return S
-
-
-# kernel inversion method within fastsum implementation
-def build_kernel_params(F, d, method, T, L, K, tau, bs):
-    def fourier_fun(x, scale):
-        x_pos = torch.abs(x)
-        S = slicing(F=lambda t: F(t/(2*scale*T)), d=d,
-                    method=method, T=T,
-                    L=L, K=K, tau=tau, bs=bs)
-        S.get_matrix()
-        S.get_range_coef()
-        S.get_domain_coef()
-        a = S.a / 2
-        a[0] *= SQRT_2
-        a = torch.cat([a, torch.tensor([0.0], device=DEVICE)])
-        f_hat = a[x_pos]
-        return f_hat
-    return dict(fourier_fun=fourier_fun)
 
 
 # kernel inversion method within fastsum implementation for imq
@@ -55,84 +30,101 @@ def build_kernel_params_imq(d, K):
 
 
 # Paramters
-d = 1000
-slicing_mode = "orthogonal"
-taus = [1e-7, 1e-7, 1e-5]
+# d = 1000
+# P = 1000
 
-# d = 100
-# slicing_mode = "distance"
-# taus = [1e-6, 1e-6, 1e-4]
+d = 100
+P = 100
 
 # Hyperparamters
-reps = 10
 T = 1
-bs = 2**6
-bs_mmd = 50
-N, M, P = 10000, 10000, 5000
-L, K = 2**10, 2**8
-Functions = [Gauss, Laplace, Riesz, thin_plate, logarithmic,
-             inverse_multi_quadric, lambda t: bumb(t, c=2),
-             inverse_logarithmic, multi_quadric]
-Function_names = ["Gauss", "Laplace", "energy", "thin_plate", "logarithmic",
-                  "imq", "bumb",
-                  "inv-log", "mq"]
+bs = 2**10
+L = 2**10
+K = 2**8
+slicing_mode = "orthogonal"
+taus = [1e-6, 1e-7, 1e-4]
 
-torch.manual_seed(42)
-X = torch.randn((N, d, reps), device=DEVICE)
-Y = torch.randn((M, d, reps), device=DEVICE)
-Xw = torch.rand((N, reps), device=DEVICE)
+# Test functions
+Functions = [Gauss, Laplace, inverse_multi_quadric, thin_plate,
+             logarithmic, multi_quadric, lambda t: bump(t, c=3)]
+Function_names = ["Gauss", "Laplace", "imq", "thin_plate",
+                  "logarithmic", "mq", "Bump"]
+
+# Test data
+N = 10000
+M = N
+reps = 10
+torch.manual_seed(222)
+torch.cuda.manual_seed_all(222)
+X = torch.randn((N, d, reps))
+Y = torch.randn((M, d, reps))
+Xw = torch.rand((N, reps))
 scale = torch.median(torch.norm(X, dim=1)).item()
 print("scale", scale)
+
+
 aprx_err = torch.zeros(len(Functions), reps, 4)
-
-
 for F_idx in tqdm(range(len(Functions)), desc="Outer"):
     F = Functions[F_idx]
+    torch.cuda.synchronize()
     for rep in tqdm(range(reps), desc="inner", leave=False):
-        kernel_sum = exact_mmd(
-            F, scale, X[:, :, rep], Y[:, :, rep], Xw[:, rep], bs_mmd)
+        x = X[:, :, rep].to(DEVICE).contiguous()
+        y = Y[:, :, rep].to(DEVICE).contiguous()
+        w = Xw[:, rep].to(DEVICE).contiguous()
+
+        # exact summation - will be modified in next lines
+        fastsum = Fastsum(d, kernel="Gauss", device=DEVICE, slicing_mode="iid")
+        fastsum.basis_F = lambda x, scale: Functions[F_idx](x / scale)
+        KS_exact = fastsum.naive(x, y, w, scale)
+
+        # methods F-L2-H1, S-L2-H1, S-H1-H1
         for method in range(3):
             tau = taus[method]
-            kernel_params = build_kernel_params(
-                F, d, method, T, L, K, tau, bs)
+            kernel_params = build_kernel_params(F, d, method, T, L, K, tau, bs)
             fastsum = Fastsum(d, kernel="other", device=DEVICE,
                               kernel_params=kernel_params,
                               n_ft=2*K,
-                              batch_size_P=100,
-                              batch_size_nfft=100,
+                              batch_size_P=1000,
+                              batch_size_nfft=64,
                               slicing_mode=slicing_mode)
-            kernel_sum0 = fastsum(X[:, :, rep], Y[:, :, rep],
-                                  Xw[:, rep], scale, P)
-            aprx_err[F_idx, rep, method] = torch.linalg.norm(
-                kernel_sum0 - kernel_sum) / torch.linalg.norm(kernel_sum)
-        if Function_names[F_idx] == "imq":
-            kernel_params3 = build_kernel_params_imq(d, K)
-            fastsum3 = Fastsum(d, kernel="other", device=DEVICE,
-                               kernel_params=kernel_params3,
-                               batch_size_P=100,
-                               batch_size_nfft=100,
-                               n_ft=2*K, slicing_mode=slicing_mode)
+            KS_sliced = fastsum(x, y, w, scale, P)
+            aprx_err[F_idx, rep, method] = (
+                (KS_sliced - KS_exact).norm()/KS_exact.norm())
 
-            kernel_sum3 = fastsum3(X[:, :, rep], Y[:, :, rep],
-                                   Xw[:, rep], scale, P)
-        elif F_idx < 5:
-            fastsum3 = Fastsum(d, kernel=Function_names[F_idx], device=DEVICE,
-                               n_ft=2*K, slicing_mode=slicing_mode,
-                               batch_size_P=100,
-                               batch_size_nfft=100)
-            kernel_sum3 = fastsum3(X[:, :, rep], Y[:, :, rep],
-                                   Xw[:, rep], scale, P)
+        # Direct method
+        F_name = Function_names[F_idx]
+        if F_name == "imq":
+            kernel_params = build_kernel_params_imq(d, K)
+            fastsum = Fastsum(d, kernel="other", device=DEVICE,
+                              kernel_params=kernel_params,
+                              batch_size_P=1000,
+                              batch_size_nfft=64,
+                              n_ft=2*K, slicing_mode=slicing_mode)
+
+            KS_direct = fastsum(x, y, w, scale, P)
+        elif F_name in ["Gauss", "Laplace", "thin_plate", "logarithmic"]:
+            fastsum = Fastsum(d, kernel=Function_names[F_idx], device=DEVICE,
+                              n_ft=2*K, slicing_mode=slicing_mode,
+                              batch_size_P=1000,
+                              batch_size_nfft=64
+                              )
+            KS_direct = fastsum(x, y, w, scale, P)
         else:
-            kernel_sum3 = kernel_sum
-        aprx_err[F_idx, rep, 3] = (torch.linalg.norm(kernel_sum3 - kernel_sum)
-                                   / torch.linalg.norm(kernel_sum))
+            KS_direct = KS_exact
+        aprx_err[F_idx, rep, 3] = (KS_direct - KS_exact).norm()/KS_exact.norm()
 
+print(f"d={d}, P={P}, taus={taus}, N={N}")
 
 # Compute means and std dev
 mn = torch.mean(aprx_err, dim=1)
 sd = torch.std(aprx_err, dim=1)
 
+# Display errors in Latex format
+rel_sd = sd/mn
+rel_sd = torch.nan_to_num(rel_sd, nan=0.0, posinf=0.0, neginf=0.0)
+print("relative sd", rel_sd.max())
 
+print("\n\n  MEAN\n")
 # Display errors in Latex format
 print("Function & S-L2-H1          & F-L2-H1              & F-H1-H1              & Direct         \\\\")
 for F_id in range(len(Functions)):
@@ -140,3 +132,11 @@ for F_id in range(len(Functions)):
     for method in range(4):
         print(" & $\\num{" + f"{mn[F_id, method].item():.2e}" + "} $", end="")
     print("\\\\")
+
+
+import matplotlib.pyplot as plt
+s = torch.linspace(-3, 3, 1001)
+for f_id in range(len(Functions)):
+    plt.plot(s, Functions[f_id](s), label=Function_names[f_id])
+plt.ylim([-2, 3])
+plt.show()
