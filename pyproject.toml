@@ -7,10 +7,11 @@ name = "slicing_inversion"
 version = "0.1.0"
 description = "Numerical Methods for Kernel Slicing"
 authors = [{ name = "Nicolaj Rux", email = "rux@math.tu-berlin.de" }]
-license = { text = "MIT" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = [
-    "torch>=2.5.1",
-    "numpy>=2.0.2"
-]
+dependencies = ["torch>=2.5.1", "numpy>=2.0.2"]
+
+[project.optional-dependencies]
+test = ["pykeops>=2.3", "tqdm>=4.66.5", "matplotlib>=3.9.2"]
+nfft = ["simple_torch_NFFT @ git+https://github.com/johertrich/simple_torch_NFFT.git"]
