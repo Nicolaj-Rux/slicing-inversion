@@ -1,2 +1,152 @@
-# slicing-inversion
- Python module for inverting the spherical slicing transform via Fourier analysis.
+ 
+# Numerical Methods for Kernel Slicing
+ In this library, we implement two methods to invert the slicing operator $\mathcal{S}_d: L^2([0,1])\mapsto L^2([0,1])$ given\
+![formula](<https://latex.codecogs.com/svg.latex?\mathcal{S}[f](s):=\int_0^1f(ts)\varrho_d(t)\,\mathrm{d}t,\quad\text{where } \varrho_d(t):= c_d(1-t^2)^{(d-3)/2} \text{ and } c_d:=\frac{2\Gamma(\frac{d}{2})}{\sqrt{\pi}\Gamma(\frac{d-1}{2})}. >)
+
+Put a gif here of the transformation
+
+## Dependencies
+
+This project requires the following Python (version 3.9.21) packages:
+
+/dev requires:
+- [PyTorch](https://pytorch.org/) version 2.5.1
+- [NumPy](https://numpy.org/) version 2.0.2
+
+/test additionally requires:
+- [PyKeOps](https://www.kernel-operations.io/) version 2.3
+- [simple_torch_NFFT](https://github.com/johertrich/simple_torch_NFFT)
+- [tqdm](https://tqdm.github.io/) version 4.66.5
+- [matplotlib](https://matplotlib.org/) version 3.9.2
+
+ ## Installation
+ To install package run:
+ ```python
+pip install git+https://github.com/Nicolaj-Rux/slicing-inversion
+```
+Create test file ```test.py``` with content:
+```python
+from  slicing_inversion.slicing import slicing
+S = slicing(F= lambda s: s**2, d=10)
+print(S.evaluate())
+```
+When running ```python test.py``` should return
+```python
+(2.5949782411771594e-06, 6.033632278442383, 14.8980712890625)
+```
+## Method
+Import the class ```slicing``` as ```from  slicing_inversion.slicing import slicing```.
+Prepare a torch function ```F``` from $[0,1]\to\mathbb{R}$ and a dimension $d\ge 3$.
+For example ```def F(s): return torch.exp(-s**2)``` and a dimension ```d=100```.
+Then ```S = slicing(F=F, d=d)``` creates an instance of that class. To compute $f$ first call ```S.get_matrix()```.
+This step computes the inversion matrix which is independent of $F$.
+It will automatically be cahed, so that it can be reused again if required.
+Call ```S.get_range_coef()``` to expand $F$ by some basis and then recover the $f$ in terms of the cosine coefficients with ```S.get_domain_coef()```.
+Afterwards the coeficients are stored under ```S.a```.
+The complete flow would look like
+```python
+from  slicing_inversion.slicing import slicing
+import torch
+
+def F(s): return torch.exp(-s**2)
+d = 100
+
+S = slicing(F= lambda s: s**2, d=10)
+S.get_matrix()
+S.get_range_coef()
+S.get_domain_coef()
+print(S.a) # Fourier coefficients of f
+```
+
+### Hyperparamters
+The class comes with several default hyperparamters 
+```python
+method: int = 0,
+T: float = 1.,
+L: int = 2**10,
+K: int = 2**8,
+tau: float = 1e-6,
+bs: int = 2**10
+```
+
+```method``` can be chosen as $0,1$ or $2$. Further details to the methods can be found in corresponding paper [Numerical Methods for Kernel Slicing](https://arxiv.org/abs/2510.11478)
+
+
+
+## Mathematical background
+Given a function $F:[0,\infty)\to \mathbb{R}$ and points $x_1,\ldots, x_N\in \mathbb{R}^d$, $y_1,\ldots, y_M\in \mathbb{R}^d$ as well as wieghts $w_1,\ldots, w_N\in \mathbb{R}$ define
+
+$$ s_m := \sum_{n=1}^N w_n F(\Vert x_n-y_m\Vert) \quad \text{ for all } m=1,\ldots,M. $$
+
+If $N=M$ the naive computation of $s$ requires $\mathcal{O}(N^2)$ operations which is infeasable for large $N$ and $M$.
+The paper [Fast Kernel Summation in High Dimensions via Slicing and Fourier Transforms](https://epubs.siam.org/doi/10.1137/24M1632085) introduces a method to reduce the quadratic time complexity to linear, by slicing the function $F$ to a one dimensional function $f:[0,\infty)\to \mathbb{R}$. That means finding $f$ such that
+
+$$ F(\Vert x\Vert)=\int_{\mathbb{S}^{d-1}} f(|\langle x,\xi\rangle|)\mathrm{d} \xi \quad \text{ for all } x\in \mathbb{R}^d.\qquad (\star)  $$
+
+Choosing $P$ slicing directions $\xi_1,\ldots,\xi_P\in \mathbb{S}^{d-1} the integral can be approximated as
+
+$$ F(\Vert x\Vert)=\int_{\mathbb{S}^{d-1}} f(|\langle x,\xi\rangle|)\mathrm{d} \xi = \mathbb{E}_{\xi\sim \mathcal{U}_{\mathbb{S}^{d-1}}}[f(|\langle x, \xi\rangle|)]\approx \frac{1}{P} \sum_{p=1}^P f(|\langle x, \xi_p\rangle|).$$
+
+More information about good choices of slicing directions can be found in [FAST SUMMATION OF RADIAL KERNELS VIA QMC SLICING](https://openreview.net/pdf?id=iNmVX9lx9l)
+The $d$-dimensional kernel summation can be reduced to $P$ onedimensional kernel summations
+
+$$s_m = \sum_{n=1}^N w_n F(\Vert x_n-y_m\Vert) \approx \sum_{n=1}^N w_n \frac{1}{P} \sum_{p=1}^P f(|\langle x_n-y_m, \xi\rangle|) = \frac{1}{P}\sum_{p=1}^P \sum_{n=1}^N w_n f(|\langle x_n, \xi_p\rangle - \langle y_m,\xi_p\rangle|)$$
+
+At first this seems more complicated. The advantage is that the onedimensional kernel sums $s_m^p:= \sum_{n=1}^N w_n f(|\langle x_n, \xi_p\rangle - \langle y_m,\xi_p\rangle|)$ can be computed in linear time using Fourier methods. 
+Expand $f$ as fourier series with $K$ coefficients as
+
+$$f(|t|)\approx \sum_{k=-K}^K c_k \mathrm{e}^{2\pi \mathrm{i} kt}.$$
+
+Then we can compute $s_m^p$ for fixed $p$ simultaniously for all $m=1,\ldots, M$ as
+
+$$ s_m^p = \sum_{n=1}^N w_n f(|\langle x_n,\xi_p\rangle - \langle y_m,\xi_p\rangle|)\approx  \underbrace{\sum_{k=-K}^K c_k \mathrm{e}^{ - 2\pi \mathrm{i} k\langle y_m,\xi_p\rangle}}_{\tilde s_k^p} \underbrace{\sum_{n=1}^N \mathrm{e}^{2\pi \mathrm{i} k \langle x_n,\xi_p\rangle}}_{\hat w_m^p} $$
+
+Now $\hat w_k^p$ can be computed efficiently using nfft in $\mathcal{O}(N + K\log K)$ after that the multiplication of $c_k$ and $\hat w_k^p$ is in $\mathcal{O}(k)$ and lastly the computation of $\tilde s_m^p$ for all $m=1,\ldots,M$ is in $\mathcal{O}(M+K\log K)$. Since we have to do this for each slicing direction we end up in a time complexity of $\mathcal O(P(N+M+K\log K))$.
+Since $P$ and $K$ are independent of the data size $N$ and $M$, timecomplexity $\mathcal O(P(N+M+K\log K))$ is a huge improvment to $\mathcal{O}(NM)$ if we have large data, i.e. $K,P\ll N,M$.
+
+As prequisite to applying this slicing method the slicing transformation needs to be inverted which means finding $f$ satisfying ($\star$). Interestingly ($\star$) equivalent reads $\mathcal{S}_d[f]=F$.
+For some kernels such as Riesz, Gauss, Laplace kernel the slicied kernel $f$ is known. In this Project we focus on Numerical methods to compute $f$ in terms of $K$ fourier coefficients, given a kernel $F$ in dimension $d$.
+
+
+## Citation
+
+This library was written by [Nicolaj Rux](https://Nicolaj-Rux.github.io) in the context of fast kernel summations via slicing.
+If you find it usefull, please consider to cite
+
+```
+@misc{RHN2025,
+      title={Numerical Methods for Kernel Slicing}, 
+      author={Nicolaj Rux and Johannes Hertrich and Sebastian Neumayer},
+      year={2025},
+      eprint={2510.11478},
+      archivePrefix={arXiv},
+      primaryClass={math.NA},
+      url={https://arxiv.org/abs/2510.11478}, 
+}
+```
+
+ or
+
+```
+@inproceedings{HJQ2025,
+  title={Fast Summation of Radial Kernels via {QMC} Slicing},
+  author={Johannes Hertrich and Tim Jahn and Michael Quellmalz},
+  booktitle={The Thirteenth International Conference on Learning Representations},
+  year={2025},
+  url={https://openreview.net/forum?id=iNmVX9lx9l}
+}
+```
+
+or
+
+```
+@article{H2024,
+  title={Fast Kernel Summation in High Dimensions via Slicing and {F}ourier transforms},
+  author={Hertrich, Johannes},
+  journal={SIAM Journal on Mathematics of Data Science},
+  volume={6},
+  number={4},
+  pages={1109--1137},
+  year={2024}
+}
+```
