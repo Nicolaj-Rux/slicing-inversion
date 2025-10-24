@@ -1,7 +1,11 @@
+![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
  
+
 # Numerical Methods for Kernel Slicing
- In this library, we implement two methods to invert the slicing operator $\mathcal{S}_d: L^2([0,1])\mapsto L^2([0,1])$ given\
-![formula](<https://latex.codecogs.com/svg.latex?\mathcal{S}[f](s):=\int_0^1f(ts)\varrho_d(t)\,\mathrm{d}t,\quad\text{where } \varrho_d(t):= c_d(1-t^2)^{(d-3)/2} \text{ and } c_d:=\frac{2\Gamma(\frac{d}{2})}{\sqrt{\pi}\Gamma(\frac{d-1}{2})}. >)
+ In this library, we implement two methods to invert the slicing operator $\mathcal{S}_d: L^2([0,1])\mapsto L^2([0,1])$ given
+ 
+$$ \mathcal{S}f(s):= \int_0^1 f(ts)\varrho_d(t)\,\mathrm{d}t, \quad \text{ where } \varrho_d(t):= c_d(1-t^2)^{(d-3)/2} \text{ and } c_d:=\frac{2\Gamma(\frac{d}{2})}{\sqrt{\pi}\Gamma(\frac{d-1}{2})}.$$
 
 Put a gif here of the transformation
 
