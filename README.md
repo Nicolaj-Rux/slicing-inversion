@@ -7,17 +7,24 @@
  
 $$ \mathcal{S}f(s):= \int_0^1 f(ts)\varrho_d(t)\,\mathrm{d}t, \quad \text{ where } \varrho_d(t):= c_d(1-t^2)^{(d-3)/2} \text{ and } c_d:=\frac{2\Gamma(\frac{d}{2})}{\sqrt{\pi}\Gamma(\frac{d-1}{2})}.$$
 
-Put a gif here of the transformation
+Forward pass of slicing operator $\mathcal{S}_d$, here for dimension $d=50$.
+Left function $f:[0,1]\to \mathbb{R}$, right tranformation $F=\mathcal{S}_d f:[0,1]\to \mathbb{R}$.
+<p align="center">
+  <img src="https://github.com/Nicolaj-Rux/slicing-inversion/blob/main/forwardpass.gif" width="900" /> 
+</p>
 
+Our code takes $F$ and $d$ as input and returns $f$ in terms of $K$ fourier coefficients by solving a regularized minimization problem of type
+
+$$\arg\min_{a\in \mathbb{R}^{K}} \Vert \mathcal{S}_d f_a-F\Vert\quad \text{where } f_a(t)=\sum_{k=0}^{K-1} a_k \cos(\pi k t).$$
 ## Dependencies
 
 This project requires the following Python (version 3.9.21) packages:
 
-/dev requires:
+```/dev``` requires:
 - [PyTorch](https://pytorch.org/) version 2.5.1
 - [NumPy](https://numpy.org/) version 2.0.2
 
-/test additionally requires:
+```/test``` additionally requires:
 - [PyKeOps](https://www.kernel-operations.io/) version 2.3
 - [simple_torch_NFFT](https://github.com/johertrich/simple_torch_NFFT)
 - [tqdm](https://tqdm.github.io/) version 4.66.5
@@ -41,11 +48,11 @@ When running ```python test.py``` should return
 ## Method
 Import the class ```slicing``` as ```from  slicing_inversion.slicing import slicing```.
 Prepare a torch function ```F``` from $[0,1]\to\mathbb{R}$ and a dimension $d\ge 3$.
-For example ```def F(s): return torch.exp(-s**2)``` and a dimension ```d=100```.
+For example ```def F(s): return torch.exp(-s**2)``` and ```d=100```.
 Then ```S = slicing(F=F, d=d)``` creates an instance of that class. To compute $f$ first call ```S.get_matrix()```.
 This step computes the inversion matrix which is independent of $F$.
 It will automatically be cahed, so that it can be reused again if required.
-Call ```S.get_range_coef()``` to expand $F$ by some basis and then recover the $f$ in terms of the cosine coefficients with ```S.get_domain_coef()```.
+Call ```S.get_range_coef()``` to expand $F$ by some basis (depends on the ```method```, see section Hyperparamters) and then recover the $f$ in terms of the cosine coefficients with ```S.get_domain_coef()```.
 Afterwards the coeficients are stored under ```S.a```.
 The complete flow would look like
 ```python
@@ -73,7 +80,12 @@ tau: float = 1e-6,
 bs: int = 2**10
 ```
 
-```method``` can be chosen as $0,1$ or $2$. Further details to the methods can be found in corresponding paper [Numerical Methods for Kernel Slicing](https://arxiv.org/abs/2510.11478)
+The first hyperparamter ```method``` can be chosen as $0,1$ or $2$. Further details to the methods can be found in corresponding paper [Numerical Methods for Kernel Slicing](https://arxiv.org/abs/2510.11478). The scaling $T=1$ usually works best. The number of quadrature points is set to $L$ and the number of Fourier coefficients that are used to recover $f$ is $K$. When modifying $L$ and $K$ enure $L>K$, to keep numerical integration stable. The regularization strenght is $\tau$. We found $10^{-6}$ to generally perform best. For method $2$ larger regularization around $10^{-4}$ can be preferable. The batchsize ```bs``` can be set smaller when using large $L$ and $K$ on a small GPU.
+
+The density $\varrho_d$ vanishes around $1$ and concentrates around $0$ for $d\to \infty$. Therefore the forward operator $\mathcal{S}_d$ has little impact on values around $1$. Hence, we can focus the approximation of $f$ on the intervall $[0,T]$ with $T<1$. However, in practise this hat little impact on the accuracy, so that $T=1$ usually workes similarly well.
+<p align="center">
+  <img src="https://github.com/Nicolaj-Rux/slicing-inversion/blob/main/density.gif" width="900" /> 
+</p>
 
 
 
@@ -82,7 +94,7 @@ Given a function $F:[0,\infty)\to \mathbb{R}$ and points $x_1,\ldots, x_N\in \ma
 
 $$ s_m := \sum_{n=1}^N w_n F(\Vert x_n-y_m\Vert) \quad \text{ for all } m=1,\ldots,M. $$
 
-If $N=M$ the naive computation of $s$ requires $\mathcal{O}(N^2)$ operations which is infeasable for large $N$ and $M$.
+If $N=M$ the naive computation of $s$ requires $\mathcal{O}(N^2)$ operations which is infeasable for large $N$.
 The paper [Fast Kernel Summation in High Dimensions via Slicing and Fourier Transforms](https://epubs.siam.org/doi/10.1137/24M1632085) introduces a method to reduce the quadratic time complexity to linear, by slicing the function $F$ to a one dimensional function $f:[0,\infty)\to \mathbb{R}$. That means finding $f$ such that
 
 $$ F(\Vert x\Vert)=\int_{\mathbb{S}^{d-1}} f(|\langle x,\xi\rangle|)\mathrm{d} \xi \quad \text{ for all } x\in \mathbb{R}^d.\qquad (\star)  $$
@@ -109,12 +121,12 @@ Now $\hat w_k^p$ can be computed efficiently using nfft in $\mathcal{O}(N + K\lo
 Since $P$ and $K$ are independent of the data size $N$ and $M$, timecomplexity $\mathcal O(P(N+M+K\log K))$ is a huge improvment to $\mathcal{O}(NM)$ if we have large data, i.e. $K,P\ll N,M$.
 
 As prequisite to applying this slicing method the slicing transformation needs to be inverted which means finding $f$ satisfying ($\star$). Interestingly ($\star$) equivalent reads $\mathcal{S}_d[f]=F$.
-For some kernels such as Riesz, Gauss, Laplace kernel the slicied kernel $f$ is known. In this Project we focus on Numerical methods to compute $f$ in terms of $K$ fourier coefficients, given a kernel $F$ in dimension $d$.
+For some kernels such as Riesz, Gauss, Laplace kernel the slicied kernel $f$ is known. In this Project we focus on Numerical methods to compute $f$ in terms of $K$ fourier coefficients, given an arbitrary kernel $F$ in dimension $d$.
 
 
 ## Citation
 
-This library was written by [Nicolaj Rux](https://Nicolaj-Rux.github.io) in the context of fast kernel summations via slicing.
+This library was written by [Nicolaj Rux](https://scholar.google.com/citations?user=G8T1CF8AAAAJ&hl=en) in the context of fast kernel summations via slicing.
 If you find it usefull, please consider to cite
 
 ```
